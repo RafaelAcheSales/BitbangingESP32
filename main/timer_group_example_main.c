@@ -56,8 +56,7 @@ static void inline print_timer_counter(uint64_t counter_value)
 
 static bool IRAM_ATTR timer_group_isr_callback(void *args)
 {
-    gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
-    cnt++;
+    
     BaseType_t high_task_awoken = pdFALSE;
     example_timer_info_t *info = (example_timer_info_t *) args;
 
@@ -144,16 +143,18 @@ void app_main(void)
     while (1) {
         example_timer_event_t evt;
         xQueueReceive(s_timer_queue, &evt, portMAX_DELAY);
+        gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
+        cnt++;
         char data;
         // if current char is not null
-        if (current_char != '\0') {
+        // if (current_char != '\0') {
             
-        } else {
-            if (buffer_empty(&output_buffer) == 0) {
-                buffer_retrieve(&output_buffer, &data, 1);
-                printf("%c\n", data);
-            }
-        }
+        // } else {
+        //     if (buffer_empty(&output_buffer) == 0) {
+        //         buffer_retrieve(&output_buffer, &data, 1);
+        //         printf("%c\n", data);
+        //     }
+        // }
         
         /* Print information that the timer reported an event */
         if (evt.info.auto_reload) {
