@@ -7,6 +7,7 @@
    CONDITIONS OF ANY KIND, either express or implied.
 */
 #include <stdio.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -15,13 +16,17 @@
 #include "buffer_ring.h"
 
 #define GPIO_OUTPUT_IO_0    12
+#define GPIO_INPUT_IO_0     15
 #define GPIO_OUTPUT_PIN_SEL  1ULL<<GPIO_OUTPUT_IO_0
+#define GPIO_INPUT_PIN_SEL  1ULL<<GPIO_INPUT_IO_0
 #define TIMER_DIVIDER         2  //  Hardware timer clock divider
 #define TIMER_SCALE           (TIMER_BASE_CLK / TIMER_DIVIDER)  // convert counter value to seconds
 
 int cnt = 0;
 char current_char = '\0';
-int bit_count = 0;
+char sender = '\x55';
+int bit_count = -1;
+
 CIRCULAR_BUFFER_DECLARE(output_buffer);
 /** circular buffer management structure */
 
@@ -41,7 +46,9 @@ typedef struct {
     uint64_t timer_counter_value;
 } example_timer_event_t;
 
+
 static xQueueHandle s_timer_queue;
+static xQueueHandle gpio_evt_queue = NULL;
 
 /*
  * A simple helper function to print the raw timer counter value
@@ -122,20 +129,8 @@ static void example_tg_timer_init(int group, int timer, bool auto_reload, int ti
 
 void app_main(void)
 {
-    buffer_insert(&output_buffer, "abcdefghijabcdefghijabcdefghijabcdefghijabcdefghijabcdefghij", 60);
-    gpio_config_t io_conf;
-    //disable interrupt
-    io_conf.intr_type = GPIO_INTR_DISABLE;
-    //set as output mode
-    io_conf.mode = GPIO_MODE_OUTPUT;
-    //bit mask of the pins that you want to set,e.g.GPIO18/19
-    io_conf.pin_bit_mask = GPIO_OUTPUT_PIN_SEL;
-    //disable pull-down mode
-    io_conf.pull_down_en = 0;
-    //disable pull-up mode
-    io_conf.pull_up_en = 0;
-    //configure GPIO with the given settings
-    gpio_config(&io_conf);
+    buffer_insert(&output_buffer, &sender, 1);
+    
     s_timer_queue = xQueueCreate(10, sizeof(example_timer_event_t));
     example_tg_timer_init(TIMER_GROUP_0, TIMER_0, true, 1);
     //example_tg_timer_init(TIMER_GROUP_1, TIMER_0, false, 5);
@@ -143,29 +138,43 @@ void app_main(void)
     while (1) {
         example_timer_event_t evt;
         xQueueReceive(s_timer_queue, &evt, portMAX_DELAY);
-        gpio_set_level(GPIO_OUTPUT_IO_0, cnt % 2);
-        cnt++;
+        
         char data;
-        // if current char is not null
-        // if (current_char != '\0') {
-            
-        // } else {
-        //     if (buffer_empty(&output_buffer) == 0) {
-        //         buffer_retrieve(&output_buffer, &data, 1);
-        //         printf("%c\n", data);
-        //     }
-        // }
-        
-        /* Print information that the timer reported an event */
-        if (evt.info.auto_reload) {
-            //printf("Timer Group with auto reload\n");
-        } else {
-           // printf("Timer Group without auto reload\n");
+        //if current char is null
+        if (current_char == '\0') {
+            if (buffer_empty(&output_buffer) == 0) {
+                buffer_retrieve(&output_buffer, &data, 1);
+                current_char = data;
+                bit_count = -1;
+                //sender = (char) (rand() % 127);
+                
+            } else {
+                if (rand() % 9600 == 0) {
+                    buffer_insert(&output_buffer, &sender, 1);
+                }
+            }
         }
-
-        uint64_t task_counter_value;
-        timer_get_counter_value(evt.info.timer_group, evt.info.timer_idx, &task_counter_value);
-        //print_timer_counter(task_counter_value);
+        //if there is something to send
+        if (current_char != '\0') {
+            //start bit
+            if (bit_count == -1) {
+                //printf("start bit\n");
+                gpio_set_level(GPIO_OUTPUT_IO_0, 0);
+                bit_count++;
+            } else if (bit_count >=0 && bit_count < 8) { //data bits
+                int masked_and = ((1U<<bit_count) & current_char) == 0 ? 0 : 1;
+                gpio_set_level(GPIO_OUTPUT_IO_0, masked_and);
+                //printf("%d\n", masked_and);
+                bit_count++;
+            } else { //stop bit
+                //printf("stop bit\n");
+                gpio_set_level(GPIO_OUTPUT_IO_0, 1);
+                current_char = '\0';
+                bit_count = -1;
+            }
+        }
         
+
+        //printf("%d", masked_and);
     }
 }
